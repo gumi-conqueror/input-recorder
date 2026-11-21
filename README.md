@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-项目处于技术方案阶段，尚无可运行程序。推荐技术栈为 **Rust + egui/eframe + Windows 输入接口 + SQLite**。详细设计、覆盖范围和实施顺序见[技术方案](docs/design.md)。
+项目处于技术方案阶段，尚无可运行程序。推荐技术栈为 **Rust + egui/eframe（wgpu / Direct3D 12）+ Windows 输入接口 + SQLite**。Windows 图形后端优先 DirectX，启动时按所选采集功能的需要请求管理员权限。详细设计、覆盖范围和实施顺序见[技术方案](docs/design.md)。
 
 计划提供：
 

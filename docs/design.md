@@ -15,17 +15,36 @@ Windows 为主要平台。覆盖目标包括键盘、鼠标、手柄、摇杆、
 | 部分 | 选择 | 原因 |
 | --- | --- | --- |
 | 语言 | Rust，2024 edition | 统一采集、存储和界面代码；通过所有权管理设备句柄和线程资源 |
-| 图形界面 | egui / eframe | 适合设备列表、表格、十六进制查看器和简单时间线；直接构建本地应用 |
+| 图形界面 | egui / eframe，使用 wgpu 的 Direct3D 12 后端 | 适合设备列表、表格和时间线；Windows 优先使用 DirectX |
 | Windows 调用 | Microsoft `windows` crate | 使用官方 Windows API 绑定，隔离平台调用 |
 | 输入采集 | Raw Input、HID API，以及按设备类别增加的后端 | 保留设备来源和原始数据，兼容不同输入模型 |
 | 本地存储 | rusqlite + SQLite，WAL 模式 | 批量写入事件；按设备、会话和时间查询 |
 | 导出 | serde / serde_json、CSV、ZIP | JSONL 保存结构化事件，二进制文件保存报告，CSV 用于快速查看 |
 | 并发 | 专用采集线程、写入线程、有界通道 | 让磁盘和界面工作不阻塞采集；显式处理过载 |
 | 分发 | Windows x64 便携包；随后验证 ARM64 | 降低设备持有者的使用成本；额外运行时需求必须在包内说明 |
+| 运行权限 | 默认 asInvoker，启动预检后按需通过 runas 提权 | 普通权限功能直接可用，需要管理员权限的采集功能单独识别 |
 
 推荐采用这一组合。现有组织项目使用 Rust，可以沿用相关经验。Tauri + Vue 适合更复杂的网页式界面，但当前功能会增加前端构建和进程通信工作。C# + WPF 也是可行备选，适合团队更熟悉 .NET 的情况。[egui](https://github.com/emilk/egui) 和 [windows-rs](https://github.com/microsoft/windows-rs) 的官方仓库提供了对应能力和许可说明。
 
 首次实现时固定 Rust 工具链和依赖锁文件，验证依赖许可。GameInput 等可选组件需先验证 Rust 绑定、运行时发现和分发条件。当前方案不预设未经验证的依赖版本，也不承诺单个可执行文件覆盖所有后端。
+
+## Windows 渲染与启动权限
+
+Windows 默认渲染路径确定为 egui → eframe / egui-wgpu → wgpu → Direct3D 12。项目要求避开 OpenGL 的帧率问题和 Vulkan 的崩溃风险，因此不依赖框架自动选择后端。此项是项目的后端约束，具体性能仍需在目标硬件验证。
+
+构建时关闭 eframe 和 wgpu 的默认特性，按锁定版本显式启用所需的界面、字体、着色器和 DX12 特性。Windows 发行构建不启用 glow、OpenGL 或 Vulkan 渲染路径，并检查依赖特性合并后的实际结果。运行时指定 `Renderer::Wgpu`，将实例的后端限制为 `Backends::DX12`；配置和环境变量都不能扩大此集合。对应配置入口见 [eframe NativeOptions](https://docs.rs/eframe/latest/eframe/struct.NativeOptions.html)、[egui-wgpu WgpuSetup](https://docs.rs/egui-wgpu/latest/egui_wgpu/enum.WgpuSetup.html) 和 [wgpu Backends](https://docs.rs/wgpu/latest/wgpu/struct.Backends.html)。
+
+DX12 初始化失败时，通过原生 Windows 对话框说明失败原因和诊断文件位置，不自动切换 OpenGL 或 Vulkan。设备丢失与图形初始化错误写入诊断信息。是否增加 DX12 软件适配器或独立 D3D11 渲染器，由兼容性实测决定；当前不承诺这些回退路径。
+
+界面按需重绘，实时预览限频更新。高频输入的采集和落盘继续由独立线程完成。验收记录实际图形后端、适配器、可用的驱动信息、帧时间和采集丢失计数，覆盖集成显卡、独立显卡、多显示器、缩放变化、最小化恢复和高频输入场景。
+
+程序清单使用 `asInvoker`。启动时检查当前权限，以及已选设备和后端的权限要求。普通 Raw Input 采集不预设管理员要求。只有后端明确要求管理员权限，或诊断证据表明提权能够解决权限不足时，才在开始录制前说明原因，并通过 `ShellExecuteExW` 的 `runas` 动词触发用户账户控制（User Account Control，UAC）请求。首次运行尚未选择设备时，先展示普通权限界面；选择后再次检查。参见[运行权限清单](https://learn.microsoft.com/en-us/windows/win32/secbp/running-with-administrator-privileges)和 [runas 行为](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew)。
+
+首版通过重新启动应用完成提权，在录制开始前交接设备选择和启动配置。新实例就绪前保留原实例，确保只有一个实例持有采集与数据库写入职责。取消 UAC 或启动失败后继续普通权限模式，将仍不可用的采集路径标为权限受限，并允许用户手动重试。同一次启动最多自动请求一次，已提权实例不能重复请求。
+
+提权后重新验证实际权限和目标设备访问结果，记录权限状态与失败原因。始终保持原始交互会话和已选数据位置；使用其他管理员凭据时，必须核对账户与会话变化，不能静默改录其他会话或改存管理员的默认目录。录制中切换需要提权的后端时，先正常停止当前会话，再执行重启流程。
+
+管理员权限不等于 UI Access，也不能保证解除驱动独占或提供缺失的设备协议。提权失败、接口不支持和 UI Access 缺失应分别显示；安全桌面和跨用户采集的范围保持不变。UI Access 还有独立的清单、签名与安装位置要求，参见 [UI Access 条件](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-securityoverview)。
 
 ## 采集覆盖
 
@@ -116,7 +135,7 @@ diagnostics.jsonl
 checksums.sha256
 ```
 
-`manifest.json` 包含格式版本、应用版本、Windows 版本、会话时间、后端版本、筛选条件、时钟定义、记录计数和完整性状态。事件通过偏移和长度引用二进制报告，并包含原始格式标识。只导出选中记录引用的数据，不能通过整库复制带入其他设备的事件。
+`manifest.json` 包含格式版本、应用版本、Windows 版本、会话时间、后端版本、筛选条件、时钟定义、记录计数和完整性状态。诊断信息补充实际图形后端、适配器、进程权限及设备访问结果。事件通过偏移和长度引用二进制报告，并包含原始格式标识。只导出选中记录引用的数据，不能通过整库复制带入其他设备的事件。
 
 CSV 提供时间、设备、事件类型和可解析字段，允许附加原始报告十六进制列。JSONL 与二进制数据作为完整分析依据，避免 CSV 丢失嵌套字段、批次关系或原始字节。
 
@@ -130,6 +149,7 @@ CSV 提供时间、设备、事件类型和可解析字段，允许附加原始�
 
 | 阶段 | 交付 | 验收条件 |
 | --- | --- | --- |
+| 0. Windows 启动基线 | DX12 界面、权限预检和按需 UAC 重启 | 确认实际使用 DX12；图形失败有原生提示；普通权限可用；UAC 取消可继续；提权重试没有循环或重复采集 |
 | 1. 设备与数据原型 | 设备树、能力快照、Raw Input 和 HID 采集 | 同时连接同型号设备仍能区分；复合设备保留全部接口；未知 Usage 和无法读取的接口都有记录 |
 | 2. 完整录制流程 | 简单界面、SQLite、动作标签、按设备导出 | 每个已接收报告可追溯；停止后记录写入完成；导出没有混入其他设备的原始事件 |
 | 3. 离线分析 | 导入分析包、时间线、字节差异、字段视图 | 在没有目标设备和驱动的电脑上分析；未解析报告可完整查看 |
