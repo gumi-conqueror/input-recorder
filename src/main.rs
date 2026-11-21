@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod capture;
+mod devices;
+mod model;
+mod packet;
 
 use std::path::PathBuf;
 
@@ -44,6 +48,15 @@ fn data_directory() -> anyhow::Result<PathBuf> {
 
 fn run() -> anyhow::Result<()> {
     let directory = data_directory()?;
+    if std::env::args().any(|argument| argument == "--list-devices") {
+        let devices = devices::enumerate()?;
+        std::fs::write(
+            directory.join("devices.json"),
+            serde_json::to_vec_pretty(&devices)?,
+        )?;
+        println!("Found {} input interfaces", devices.len());
+        return Ok(());
+    }
     let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
     let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     // Override the environment-derived defaults before any adapter is created.
