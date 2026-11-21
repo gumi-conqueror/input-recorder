@@ -14,6 +14,22 @@ pub(crate) struct Device {
     pub errors: Vec<String>,
 }
 
+impl Device {
+    pub(crate) fn unattributed() -> Self {
+        Self {
+            id: "unattributed".into(),
+            path: String::new(),
+            name: "Unattributed input".into(),
+            kind: "unknown".into(),
+            usage_page: 0,
+            usage: 0,
+            properties: serde_json::json!({"note": "Events without a known Raw Input device; handles remain in event fields"}),
+            capabilities: Value::Null,
+            errors: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Event {
     pub sequence: u64,

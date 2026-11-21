@@ -43,6 +43,8 @@ pub(crate) struct Capture {
     pub events: Receiver<Event>,
     pub updates: Receiver<Update>,
     pub lost: Arc<AtomicU64>,
+    pub started: Instant,
+    pub started_unix_us: u128,
     thread_id: u32,
     worker: Option<JoinHandle<()>>,
 }
@@ -53,13 +55,17 @@ impl Capture {
         let (update_tx, updates) = unbounded();
         let (ready_tx, ready_rx) = bounded(1);
         let lost = Arc::new(AtomicU64::new(0));
+        let started = Instant::now();
+        let started_unix_us = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_micros();
         let state = State {
             events: event_tx,
             updates: update_tx.clone(),
             lost: lost.clone(),
             devices: BTreeMap::new(),
             registered: BTreeSet::new(),
-            started: Instant::now(),
+            started,
             sequence: 0,
             generation: 0,
             buffer: Vec::new(),
@@ -79,6 +85,8 @@ impl Capture {
             .map_err(|_| anyhow::anyhow!("capture initialization ended"))?
             .map_err(anyhow::Error::msg)?;
         Ok(Self {
+            started,
+            started_unix_us,
             events,
             updates,
             lost,
@@ -281,8 +289,10 @@ impl State {
                 .devices
                 .get(&(header.hDevice.0 as usize))
                 .map(|(device, generation)| (device.id.clone(), *generation))
-                .unwrap_or_else(|| (format!("unattributed-{:x}", header.hDevice.0 as usize), 0));
-            for report in reports {
+                .unwrap_or_else(|| ("unattributed".into(), 0));
+            for mut report in reports {
+                report.fields["raw_device_handle"] =
+                    json!(format!("{:x}", header.hDevice.0 as usize));
                 self.sequence += 1;
                 let event = Event {
                     sequence: self.sequence,

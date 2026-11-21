@@ -3,8 +3,11 @@
 mod app;
 mod capture;
 mod devices;
+mod export;
 mod model;
 mod packet;
+mod recording;
+mod storage;
 
 use std::path::PathBuf;
 
@@ -55,6 +58,34 @@ fn run() -> anyhow::Result<()> {
             serde_json::to_vec_pretty(&devices)?,
         )?;
         println!("Found {} input interfaces", devices.len());
+        return Ok(());
+    }
+    let arguments: Vec<String> = std::env::args().collect();
+    if let Some(index) = arguments
+        .iter()
+        .position(|argument| argument == "--record-seconds")
+    {
+        let seconds: u64 = arguments
+            .get(index + 1)
+            .ok_or_else(|| anyhow::anyhow!("--record-seconds requires a duration"))?
+            .parse()?;
+        anyhow::ensure!(
+            (1..=3600).contains(&seconds),
+            "duration must be between 1 and 3600 seconds"
+        );
+        let mut devices = devices::enumerate()?;
+        devices.push(model::Device::unattributed());
+        let recording = recording::Recording::start(
+            directory.join("recordings"),
+            devices,
+            "headless diagnostic".into(),
+        )?;
+        println!("Recording for {seconds} seconds");
+        std::thread::sleep(std::time::Duration::from_secs(seconds));
+        let database = recording.finish()?;
+        let output = database.with_extension("zip");
+        let count = export::bundle(&database, &export::recorded_ids(&database)?, &output)?;
+        println!("Saved {count} events to {}", output.display());
         return Ok(());
     }
     let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
