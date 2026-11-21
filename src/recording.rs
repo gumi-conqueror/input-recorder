@@ -134,11 +134,11 @@ impl Recording {
         })
     }
 
-    pub(crate) fn mark(&self, text: String) -> Result<()> {
+    pub(crate) fn mark(&self, text: String) -> Result<u64> {
         anyhow::ensure!(!text.trim().is_empty(), "enter an action label");
-        self.marker_tx
-            .send((self.started.elapsed().as_micros() as u64, text))?;
-        Ok(())
+        let elapsed_us = self.started.elapsed().as_micros() as u64;
+        self.marker_tx.send((elapsed_us, text))?;
+        Ok(elapsed_us)
     }
 
     pub(crate) fn known_loss(&self) -> u64 {

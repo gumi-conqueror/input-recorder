@@ -15,6 +15,29 @@ use crate::{
     recording::Recording,
 };
 
+enum LogEntry {
+    Input(Event),
+    Marker { elapsed_us: u64, text: String },
+}
+
+impl LogEntry {
+    fn elapsed_us(&self) -> u64 {
+        match self {
+            Self::Input(event) => event.elapsed_us,
+            Self::Marker { elapsed_us, .. } => *elapsed_us,
+        }
+    }
+}
+
+fn append_log(recent: &mut VecDeque<LogEntry>, entry: LogEntry) {
+    // Input preview can arrive after a marker with an earlier capture timestamp.
+    let index = recent.partition_point(|item| item.elapsed_us() <= entry.elapsed_us());
+    recent.insert(index, entry);
+    if recent.len() > 100 {
+        recent.pop_front();
+    }
+}
+
 pub(crate) struct App {
     directory: PathBuf,
     started: Instant,
@@ -22,7 +45,7 @@ pub(crate) struct App {
     graphics: String,
     devices: Vec<Device>,
     selected: BTreeSet<String>,
-    recent: VecDeque<Event>,
+    recent: VecDeque<LogEntry>,
     recording: Option<Recording>,
     stopping: Option<JoinHandle<Result<PathBuf>>>,
     exporting: Option<JoinHandle<Result<(PathBuf, u64)>>>,
@@ -190,10 +213,7 @@ impl eframe::App for App {
         }
         if let Some(recording) = &self.recording {
             for event in recording.preview.try_iter() {
-                self.recent.push_back(event);
-                if self.recent.len() > 100 {
-                    self.recent.pop_front();
-                }
+                append_log(&mut self.recent, LogEntry::Input(event));
             }
             let error = recording
                 .progress
@@ -302,7 +322,10 @@ impl eframe::App for App {
                 if ui.add_enabled(self.recording.is_some() && !self.marker.trim().is_empty(), egui::Button::new("Add marker")).clicked()
                     && let Some(recording) = &self.recording {
                         match recording.mark(self.marker.clone()) {
-                            Ok(()) => self.marker.clear(),
+                            Ok(elapsed_us) => {
+                                self.status = format!("Marker added at {:.3} s: {}", elapsed_us as f64 / 1_000_000.0, self.marker);
+                                append_log(&mut self.recent, LogEntry::Marker { elapsed_us, text: std::mem::take(&mut self.marker) });
+                            }
                             Err(error) => self.status = format!("Marker failed: {error:#}"),
                         }
                     }
@@ -329,11 +352,17 @@ impl eframe::App for App {
                 }
             });
             ui.separator();
-            ui.label("Recent raw input (preview may skip events; known recording loss is counted above)");
+            ui.label("Recent input and markers (preview may skip input; known recording loss is counted above)");
             egui::ScrollArea::vertical().id_salt("events").stick_to_bottom(true).show(ui, |ui| {
-                for event in &self.recent {
-                    if self.selected.contains(&event.device_id) {
-                        ui.monospace(format!("{:>10} us  {}  {}  {}", event.elapsed_us, &event.device_id[..event.device_id.len().min(8)], event.kind, hex(&event.raw[..event.raw.len().min(64)])));
+                for entry in &self.recent {
+                    match entry {
+                        LogEntry::Input(event) if self.selected.contains(&event.device_id) => {
+                            ui.monospace(format!("{:>10} us  {}  {}  {}", event.elapsed_us, &event.device_id[..event.device_id.len().min(8)], event.kind, hex(&event.raw[..event.raw.len().min(64)])));
+                        }
+                        LogEntry::Marker { elapsed_us, text } => {
+                            ui.label(egui::RichText::new(format!("{elapsed_us:>10} us  MARKER  {text}")).monospace().strong());
+                        }
+                        LogEntry::Input(_) => {}
                     }
                 }
             });
