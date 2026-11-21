@@ -1,2 +1,23 @@
 # input-recorder
-Windows-first input device diagnostics: capture device-attributed input and export offline analysis bundles.
+
+## 项目目标
+
+面向 Windows 的输入设备诊断工具。设备持有者通过简单的图形界面录制操作，按设备导出分析包。分析者无需持有实物，即可检查设备信息、原始报告和输入变化。
+
+目标覆盖当前登录用户使用的各类手动输入设备，包括未知型号和厂商自定义设备。采集范围取决于 Windows 接口、驱动和设备能力；界面应明确显示支持程度和失败原因。
+
+## 当前状态
+
+项目处于技术方案阶段，尚无可运行程序。推荐技术栈为 **Rust + egui/eframe + Windows 输入接口 + SQLite**。详细设计、覆盖范围和实施顺序见[技术方案](docs/design.md)。
+
+计划提供：
+
+- 设备枚举、热插拔识别，以及物理设备与逻辑接口的分组。
+- 保留接口提供的原始数据，同时展示可解析的按键、按钮、轴值和移动。
+- 设备过滤、开始与停止录制、测试动作标注。
+- 按设备导出 ZIP 分析包，包含 JSONL 事件、原始报告、设备能力和诊断信息。
+- 离线打开分析包，查看时间线、报告变化和采集完整性。
+
+## 许可
+
+采用 GNU General Public License v3.0 only（`GPL-3.0-only`）。完整条款见 [LICENSE](LICENSE)。
