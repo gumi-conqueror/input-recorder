@@ -1,6 +1,7 @@
 /target/
 /recordings/
 /exports/
+/dist/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
