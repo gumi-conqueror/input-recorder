@@ -78,11 +78,10 @@ pub(crate) fn check_session() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn restart(directory: &Path, selected: &BTreeSet<String>) -> Result<()> {
+pub(crate) fn restart(directory: &Path, selected: Option<&BTreeSet<String>>) -> Result<()> {
     ensure!(!is_elevated()?, "this process is already elevated");
     let executable = std::env::current_exe()?;
     let directory = std::fs::canonicalize(directory)?;
-    let selection = selected.iter().cloned().collect::<Vec<_>>().join(",");
     let mut arguments = Vec::new();
     for argument in [
         OsStr::new("--data-dir"),
@@ -95,7 +94,8 @@ pub(crate) fn restart(directory: &Path, selected: &BTreeSet<String>) -> Result<(
         }
         arguments.extend(quote(argument));
     }
-    if !selected.is_empty() {
+    if let Some(selected) = selected {
+        let selection = selected.iter().cloned().collect::<Vec<_>>().join(",");
         arguments.extend(" --selection ".encode_utf16());
         arguments.extend(quote(OsStr::new(&selection)));
     }

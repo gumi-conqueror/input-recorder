@@ -93,7 +93,7 @@ impl App {
         self.status =
             "Waiting for administrator restart. Cancelling keeps this window open.".into();
         self.restarting = Some(thread::spawn(move || {
-            permissions::restart(&directory, &selected)
+            permissions::restart(&directory, Some(&selected))
         }));
     }
 
@@ -309,7 +309,7 @@ impl eframe::App for App {
                 for device in &self.devices {
                     ui.horizontal(|ui| {
                         let mut selected = self.selected.contains(&device.id);
-                        if ui.add_enabled(idle, egui::Checkbox::new(&mut selected, format!("{} [{} {:04x}:{:04x}]", device.name, device.kind, device.usage_page, device.usage))).changed() {
+                        if ui.add_enabled(idle, egui::Checkbox::new(&mut selected, format!("{} [{} {:04x}:{:04x}] {}", device.name, device.kind, device.usage_page, device.usage, &device.id[..device.id.len().min(8)]))).changed() {
                             if selected { self.selected.insert(device.id.clone()); } else { self.selected.remove(&device.id); }
                         }
                         if let Some(recording) = &self.recording {

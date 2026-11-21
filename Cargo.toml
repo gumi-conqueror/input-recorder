@@ -10,7 +10,7 @@ repository = "https://github.com/gumi-conqueror/input-recorder"
 [dependencies]
 anyhow = "1"
 crossbeam-channel = "0.5"
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu_no_default_features"] }
+eframe = { version = "0.37", default-features = false, features = ["clipboard", "default_fonts", "system_fonts", "wgpu_no_default_features"] }
 rfd = "0.18"
 rusqlite = { version = "0.43", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

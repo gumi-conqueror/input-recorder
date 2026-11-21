@@ -23,10 +23,10 @@ use windows::{
             },
             WindowsAndMessaging::{
                 CREATESTRUCTW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-                GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE, KillTimer, MSG,
-                PostQuitMessage, PostThreadMessageW, RegisterClassW, SetTimer, SetWindowLongPtrW,
-                UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
-                WM_NCCREATE, WM_QUIT, WM_TIMER, WNDCLASSW,
+                GIDC_REMOVAL, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE,
+                KillTimer, MSG, PostQuitMessage, PostThreadMessageW, RegisterClassW, SetTimer,
+                SetWindowLongPtrW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_INPUT,
+                WM_INPUT_DEVICE_CHANGE, WM_NCCREATE, WM_QUIT, WM_TIMER, WNDCLASSW,
             },
         },
     },
@@ -136,6 +136,18 @@ struct State {
 }
 
 impl State {
+    fn disconnect(&mut self, handle: usize) {
+        if let Some((device, generation)) = self.devices.remove(&handle) {
+            self.emit(
+                &device.id,
+                generation,
+                "disconnected",
+                json!({}),
+                Vec::new(),
+            );
+        }
+    }
+
     fn report_error(&mut self, error: String) {
         // Repeated malformed reports must not create an unbounded diagnostic stream.
         if self.last_error != error {
@@ -158,15 +170,7 @@ impl State {
             .collect();
         let mut changed = !removed.is_empty();
         for handle in removed {
-            if let Some((device, generation)) = self.devices.remove(&handle) {
-                self.emit(
-                    &device.id,
-                    generation,
-                    "disconnected",
-                    json!({}),
-                    Vec::new(),
-                );
-            }
+            self.disconnect(handle);
         }
         for entry in entries {
             let handle = entry.hDevice.0 as usize;
@@ -385,7 +389,14 @@ unsafe extern "system" fn window_proc(
                 let state = &mut *pointer;
                 let result = match message {
                     WM_INPUT => state.input(HRAWINPUT(lparam.0 as *mut _)),
-                    WM_TIMER | WM_INPUT_DEVICE_CHANGE => state.refresh(window),
+                    WM_INPUT_DEVICE_CHANGE => {
+                        if wparam.0 == GIDC_REMOVAL as usize {
+                            // Evict immediately: a later arrival can reuse the same handle.
+                            state.disconnect(lparam.0 as usize);
+                        }
+                        state.refresh(window)
+                    }
+                    WM_TIMER => state.refresh(window),
                     _ => Ok(()),
                 };
                 if let Err(error) = result {

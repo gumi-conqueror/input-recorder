@@ -55,7 +55,7 @@ fn run() -> anyhow::Result<()> {
     let directory = data_directory()?;
     let mut startup_notice = None;
     if std::env::args().any(|argument| argument == "--elevate") && !permissions::is_elevated()? {
-        match permissions::restart(&directory, &Default::default()) {
+        match permissions::restart(&directory, None) {
             Ok(()) => return Ok(()),
             Err(error) => {
                 startup_notice = Some(format!(
