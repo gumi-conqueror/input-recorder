@@ -38,7 +38,8 @@ impl Recording {
         devices: Vec<Device>,
         graphics: String,
     ) -> Result<Self> {
-        std::fs::create_dir_all(&directory)?;
+        std::fs::create_dir_all(&directory)
+            .with_context(|| format!("create recording directory {}", directory.display()))?;
         let unix_us = SystemTime::now().duration_since(UNIX_EPOCH)?.as_micros();
         let path = directory.join(format!("session-{unix_us}.sqlite"));
         let selected: BTreeSet<_> = devices.iter().map(|device| device.id.clone()).collect();

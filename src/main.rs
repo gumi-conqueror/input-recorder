@@ -15,9 +15,6 @@ use std::path::PathBuf;
 fn main() {
     if let Err(error) = run() {
         let message = format!("{error:#}");
-        if let Ok(directory) = data_directory() {
-            let _ = std::fs::write(directory.join("startup-error.txt"), &message);
-        }
         eprintln!("{message}");
         rfd::MessageDialog::new()
             .set_title("Input Recorder")
@@ -39,15 +36,13 @@ fn data_directory() -> anyhow::Result<PathBuf> {
                 .get(index + 1)
                 .ok_or_else(|| anyhow::anyhow!("--data-dir requires a directory"))?,
         );
-        std::fs::create_dir_all(&directory)?;
-        return Ok(directory);
+        return Ok(std::path::absolute(directory)?);
     }
-    let base = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("LOCALAPPDATA is unavailable"))?;
-    let directory = base.join("InputRecorder");
-    std::fs::create_dir_all(&directory)?;
-    Ok(directory)
+    let executable = std::env::current_exe()?;
+    let parent = executable
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("executable directory is unavailable"))?;
+    Ok(parent.join("data"))
 }
 
 fn run() -> anyhow::Result<()> {
@@ -66,6 +61,7 @@ fn run() -> anyhow::Result<()> {
     }
     if std::env::args().any(|argument| argument == "--list-devices") {
         let devices = devices::enumerate()?;
+        std::fs::create_dir_all(&directory)?;
         std::fs::write(
             directory.join("devices.json"),
             serde_json::to_vec_pretty(&devices)?,

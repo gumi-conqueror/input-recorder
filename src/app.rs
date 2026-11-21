@@ -47,7 +47,6 @@ impl App {
         let adapter = renderer.adapter.get_info();
         anyhow::ensure!(adapter.backend == wgpu::Backend::Dx12, "DX12 is required");
         let graphics = format!("Direct3D 12 | {} | {}", adapter.name, adapter.driver);
-        std::fs::write(directory.join("graphics.txt"), &graphics)?;
         let mut app = Self {
             directory,
             started: Instant::now(),
@@ -141,6 +140,7 @@ impl App {
             return;
         };
         let Some(output) = rfd::FileDialog::new()
+            .set_directory(&self.directory)
             .add_filter("Capture bundle", &["zip"])
             .set_file_name("input-capture.zip")
             .save_file()
@@ -157,6 +157,7 @@ impl App {
 
     fn open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
+            .set_directory(self.directory.join("recordings"))
             .add_filter("Recording", &["sqlite"])
             .pick_file()
         {
@@ -269,6 +270,13 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Input Recorder");
             ui.label(&self.graphics);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("Data folder: {}", self.directory.display()));
+                if ui.add_enabled(idle, egui::Button::new("Change folder")).clicked()
+                    && let Some(directory) = rfd::FileDialog::new().set_directory(&self.directory).pick_folder() {
+                        self.directory = directory;
+                }
+            });
             ui.horizontal(|ui| {
                 ui.label(if self.elevated { "Administrator" } else { "Standard permissions" });
                 if ui.add_enabled(idle && !self.elevated, egui::Button::new("Restart as administrator"))

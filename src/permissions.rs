@@ -81,7 +81,8 @@ pub(crate) fn check_session() -> Result<()> {
 pub(crate) fn restart(directory: &Path, selected: Option<&BTreeSet<String>>) -> Result<()> {
     ensure!(!is_elevated()?, "this process is already elevated");
     let executable = std::env::current_exe()?;
-    let directory = std::fs::canonicalize(directory)?;
+    // The portable data folder may not exist until recording starts.
+    let directory = std::path::absolute(directory)?;
     let mut arguments = Vec::new();
     for argument in [
         OsStr::new("--data-dir"),

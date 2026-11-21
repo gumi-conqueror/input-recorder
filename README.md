@@ -27,7 +27,9 @@ cargo build --release --locked
 ./scripts/package.ps1
 ```
 
-Recordings normally go to `%LOCALAPPDATA%\InputRecorder\recordings`. Use `--data-dir PATH` to choose a different location. The application starts with standard permissions. Use **Restart as administrator**, or launch with `--elevate`, if you want to retry restricted device access. Declining UAC keeps standard mode available. Administrator privileges do not provide UI Access or bypass every driver restriction.
+Recordings go to `data\recordings` beside `input-recorder.exe`. The UI shows the data folder; use **Change folder** or `--data-dir PATH` to choose another location. Opening the application creates no data directory or startup log. The recording directory is created when recording starts; device-list diagnostics create their output directory only when explicitly requested. Export working files stay beside the chosen ZIP and are removed when the export finishes or returns an error. The application does not fall back to AppData or a system temporary data directory when a location is unwritable.
+
+The application starts with standard permissions. Use **Restart as administrator**, or launch with `--elevate`, if you want to retry restricted device access. Declining UAC keeps standard mode available. Administrator privileges do not provide UI Access or bypass every driver restriction.
 
 ```powershell
 # Enumerate device metadata without opening the GUI.

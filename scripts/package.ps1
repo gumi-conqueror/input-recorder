@@ -48,7 +48,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot determine source revision.' }
     "Source: https://github.com/gumi-conqueror/input-recorder/tree/$revision" | Set-Content -LiteralPath (Join-Path $packageDirectory 'SOURCE.txt') -Encoding utf8
     $archive = Join-Path $OutputDirectory 'input-recorder-windows-x64.zip'
-    Compress-Archive -LiteralPath $packageDirectory -DestinationPath $archive -Force
+    # Package only application files, even if this folder was used for recording.
+    $members = 'input-recorder.exe', 'LICENSE', 'README.md', 'bundle-format.md', 'SOURCE.txt', 'third-party' |
+        ForEach-Object { Join-Path $packageDirectory $_ }
+    Compress-Archive -LiteralPath $members -DestinationPath $archive -Force
     Get-Item -LiteralPath $archive | Select-Object FullName, Length
 } finally {
     Pop-Location
