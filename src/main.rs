@@ -6,6 +6,7 @@ mod devices;
 mod export;
 mod model;
 mod packet;
+mod permissions;
 mod recording;
 mod storage;
 
@@ -50,7 +51,19 @@ fn data_directory() -> anyhow::Result<PathBuf> {
 }
 
 fn run() -> anyhow::Result<()> {
+    permissions::check_session()?;
     let directory = data_directory()?;
+    let mut startup_notice = None;
+    if std::env::args().any(|argument| argument == "--elevate") && !permissions::is_elevated()? {
+        match permissions::restart(&directory, &Default::default()) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                startup_notice = Some(format!(
+                    "Elevation was not completed: {error:#}. Continuing without it."
+                ))
+            }
+        }
+    }
     if std::env::args().any(|argument| argument == "--list-devices") {
         let devices = devices::enumerate()?;
         std::fs::write(
@@ -104,7 +117,13 @@ fn run() -> anyhow::Result<()> {
     eframe::run_native(
         "Input Recorder",
         options,
-        Box::new(move |context| Ok(Box::new(app::App::new(context, directory, smoke_test)?))),
+        Box::new(move |context| {
+            let mut app = app::App::new(context, directory, smoke_test)?;
+            if let Some(notice) = startup_notice {
+                app.notice(notice);
+            }
+            Ok(Box::new(app))
+        }),
     )
     .map_err(|error| anyhow::anyhow!("Direct3D 12 startup failed: {error}"))
 }

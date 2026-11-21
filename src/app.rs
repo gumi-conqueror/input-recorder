@@ -11,6 +11,7 @@ use eframe::egui;
 use crate::{
     devices, export,
     model::{Device, Event, hex},
+    permissions,
     recording::Recording,
 };
 
@@ -29,6 +30,8 @@ pub(crate) struct App {
     marker: String,
     status: String,
     closing: bool,
+    elevated: bool,
+    restarting: Option<JoinHandle<Result<()>>>,
 }
 
 impl App {
@@ -60,9 +63,38 @@ impl App {
             marker: String::new(),
             status: "Select devices, then start recording.".into(),
             closing: false,
+            elevated: permissions::is_elevated()?,
+            restarting: None,
         };
         app.refresh()?;
+        let arguments: Vec<_> = std::env::args().collect();
+        if let Some(index) = arguments
+            .iter()
+            .position(|argument| argument == "--selection")
+        {
+            app.selected = arguments
+                .get(index + 1)
+                .ok_or_else(|| anyhow::anyhow!("missing device selection"))?
+                .split(',')
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
         Ok(app)
+    }
+
+    pub(crate) fn notice(&mut self, message: String) {
+        self.status = message;
+    }
+
+    fn restart_elevated(&mut self) {
+        let directory = self.directory.clone();
+        let selected = self.selected.clone();
+        self.status =
+            "Waiting for administrator restart. Cancelling keeps this window open.".into();
+        self.restarting = Some(thread::spawn(move || {
+            permissions::restart(&directory, &selected)
+        }));
     }
 
     fn refresh(&mut self) -> Result<()> {
@@ -144,6 +176,17 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self
+            .restarting
+            .as_ref()
+            .is_some_and(|job| job.is_finished())
+        {
+            match self.restarting.take().expect("finished job exists").join() {
+                Ok(Ok(())) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Ok(Err(error)) => self.status = format!("Continuing without elevation: {error:#}"),
+                Err(_) => self.status = "Administrator restart failed.".into(),
+            }
+        }
         if let Some(recording) = &self.recording {
             for event in recording.preview.try_iter() {
                 self.recent.push_back(event);
@@ -219,10 +262,20 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let idle = self.recording.is_none() && self.stopping.is_none() && self.exporting.is_none();
+        let idle = self.recording.is_none()
+            && self.stopping.is_none()
+            && self.exporting.is_none()
+            && self.restarting.is_none();
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Input Recorder");
             ui.label(&self.graphics);
+            ui.horizontal(|ui| {
+                ui.label(if self.elevated { "Administrator" } else { "Standard permissions" });
+                if ui.add_enabled(idle && !self.elevated, egui::Button::new("Restart as administrator"))
+                    .on_hover_text("Retry device access with administrator permissions. Some drivers remain inaccessible.").clicked() {
+                    self.restart_elevated();
+                }
+            });
             ui.horizontal(|ui| {
                 if ui.add_enabled(idle, egui::Button::new("Refresh devices")).clicked()
                     && let Err(error) = self.refresh() { self.status = format!("Refresh failed: {error:#}"); }

@@ -53,6 +53,8 @@ impl Recording {
                 "clock_anchor_precision": "adjacent monotonic and wall-clock reads", "graphics": graphics,
                 "selected_devices": selected, "backend": "win32_raw_input",
                 "upstream_loss_detection": "unavailable",
+                "elevated": crate::permissions::is_elevated().ok(),
+                "windows_session_id": crate::permissions::session_id().ok(),
             }),
             &devices,
         )?;
