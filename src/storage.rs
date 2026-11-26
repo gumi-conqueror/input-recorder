@@ -6,6 +6,11 @@ use serde_json::{Value, json};
 
 use crate::model::{Device, Event};
 
+/// Commit after this many events, or after `COMMIT_INTERVAL`, whichever comes first.
+/// These bound how much recorded input a crash can lose.
+const COMMIT_EVENTS: usize = 512;
+const COMMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
 pub(crate) struct Store {
     connection: Connection,
     last_commit: Instant,
@@ -93,7 +98,7 @@ impl Store {
     }
 
     pub(crate) fn flush_if_due(&mut self) -> Result<()> {
-        if self.pending >= 512 || self.last_commit.elapsed().as_millis() >= 100 {
+        if self.pending >= COMMIT_EVENTS || self.last_commit.elapsed() >= COMMIT_INTERVAL {
             self.flush()?;
         }
         Ok(())

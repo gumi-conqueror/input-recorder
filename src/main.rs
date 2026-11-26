@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod arguments;
 mod capture;
 mod devices;
 mod export;
@@ -26,17 +27,8 @@ fn main() {
 }
 
 fn data_directory() -> anyhow::Result<PathBuf> {
-    let arguments: Vec<_> = std::env::args_os().collect();
-    if let Some(index) = arguments
-        .iter()
-        .position(|argument| argument == "--data-dir")
-    {
-        let directory = PathBuf::from(
-            arguments
-                .get(index + 1)
-                .ok_or_else(|| anyhow::anyhow!("--data-dir requires a directory"))?,
-        );
-        return Ok(std::path::absolute(directory)?);
+    if let Some(directory) = arguments::value(arguments::DATA_DIR)? {
+        return Ok(std::path::absolute(PathBuf::from(directory))?);
     }
     let executable = std::env::current_exe()?;
     let parent = executable
@@ -49,7 +41,7 @@ fn run() -> anyhow::Result<()> {
     permissions::check_session()?;
     let directory = data_directory()?;
     let mut startup_notice = None;
-    if std::env::args().any(|argument| argument == "--elevate") && !permissions::is_elevated()? {
+    if arguments::flag(arguments::ELEVATE) && !permissions::is_elevated()? {
         match permissions::restart(&directory, None) {
             Ok(()) => return Ok(()),
             Err(error) => {
@@ -59,7 +51,7 @@ fn run() -> anyhow::Result<()> {
             }
         }
     }
-    if std::env::args().any(|argument| argument == "--list-devices") {
+    if arguments::flag(arguments::LIST_DEVICES) {
         let devices = devices::enumerate()?;
         std::fs::create_dir_all(&directory)?;
         std::fs::write(
@@ -69,15 +61,8 @@ fn run() -> anyhow::Result<()> {
         println!("Found {} input interfaces", devices.len());
         return Ok(());
     }
-    let arguments: Vec<String> = std::env::args().collect();
-    if let Some(index) = arguments
-        .iter()
-        .position(|argument| argument == "--record-seconds")
-    {
-        let seconds: u64 = arguments
-            .get(index + 1)
-            .ok_or_else(|| anyhow::anyhow!("--record-seconds requires a duration"))?
-            .parse()?;
+    if let Some(seconds) = arguments::text(arguments::RECORD_SECONDS)? {
+        let seconds: u64 = seconds.parse()?;
         anyhow::ensure!(
             (1..=3600).contains(&seconds),
             "duration must be between 1 and 3600 seconds"
@@ -85,7 +70,7 @@ fn run() -> anyhow::Result<()> {
         let mut devices = devices::enumerate()?;
         devices.push(model::Device::unattributed());
         let recording = recording::Recording::start(
-            directory.join("recordings"),
+            recording::directory(&directory),
             devices,
             "headless diagnostic".into(),
         )?;
@@ -97,7 +82,7 @@ fn run() -> anyhow::Result<()> {
         println!("Saved {count} events to {}", output.display());
         return Ok(());
     }
-    let smoke_test = std::env::args().any(|argument| argument == "--smoke-test");
+    let smoke_test = arguments::flag(arguments::SMOKE_TEST);
     let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     // Override the environment-derived defaults before any adapter is created.
     setup.instance_descriptor.backends = wgpu::Backends::DX12;

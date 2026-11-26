@@ -14,10 +14,13 @@ pub(crate) struct Device {
     pub errors: Vec<String>,
 }
 
+/// Device ID for input whose Raw Input handle has no known device.
+pub(crate) const UNATTRIBUTED_ID: &str = "unattributed";
+
 impl Device {
     pub(crate) fn unattributed() -> Self {
         Self {
-            id: "unattributed".into(),
+            id: UNATTRIBUTED_ID.into(),
             path: String::new(),
             name: "Unattributed input".into(),
             kind: "unknown".into(),

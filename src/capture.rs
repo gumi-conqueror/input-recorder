@@ -35,9 +35,14 @@ use windows::{
 
 use crate::{
     devices,
-    model::{Device, Event, Update},
+    model::{Device, Event, UNATTRIBUTED_ID, Update},
     packet,
 };
+
+/// Timer that polls for device changes the window messages do not report.
+const DISCOVERY_TIMER_ID: usize = 1;
+/// Device discovery interval in milliseconds; it bounds how late a hot-plugged device appears.
+const DISCOVERY_INTERVAL_MS: u32 = 2000;
 
 pub(crate) struct Capture {
     pub events: Receiver<Event>,
@@ -138,8 +143,10 @@ struct State {
 impl State {
     fn disconnect(&mut self, handle: usize) {
         if let Some((device, generation)) = self.devices.remove(&handle) {
+            let now = self.elapsed_us();
             self.emit(
-                &device.id,
+                now,
+                device.id,
                 generation,
                 "disconnected",
                 json!({}),
@@ -200,8 +207,10 @@ impl State {
             }
             device.properties["raw_input_registered"] = json!(self.registered.contains(&usage));
             self.generation += 1;
+            let now = self.elapsed_us();
             self.emit(
-                &device.id,
+                now,
+                device.id.clone(),
                 self.generation,
                 "connected",
                 json!({"device": &device}),
@@ -221,9 +230,15 @@ impl State {
         Ok(())
     }
 
+    fn elapsed_us(&self) -> u64 {
+        self.started.elapsed().as_micros().min(u64::MAX as u128) as u64
+    }
+
+    /// Numbers and queues one event. A full queue counts the event as known loss.
     fn emit(
         &mut self,
-        id: &str,
+        elapsed_us: u64,
+        device_id: String,
         generation: u64,
         kind: &str,
         fields: serde_json::Value,
@@ -232,8 +247,8 @@ impl State {
         self.sequence += 1;
         let event = Event {
             sequence: self.sequence,
-            elapsed_us: self.started.elapsed().as_micros().min(u64::MAX as u128) as u64,
-            device_id: id.into(),
+            elapsed_us,
+            device_id,
             connection: generation,
             kind: kind.into(),
             fields,
@@ -245,7 +260,7 @@ impl State {
     }
 
     fn input(&mut self, handle: HRAWINPUT) -> Result<()> {
-        let received_at = self.started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+        let received_at = self.elapsed_us();
         let mut bytes = 0;
         // SAFETY: handle is supplied by the current WM_INPUT message and consumed before DefWindowProc.
         unsafe {
@@ -293,23 +308,18 @@ impl State {
                 .devices
                 .get(&(header.hDevice.0 as usize))
                 .map(|(device, generation)| (device.id.clone(), *generation))
-                .unwrap_or_else(|| ("unattributed".into(), 0));
+                .unwrap_or_else(|| (UNATTRIBUTED_ID.into(), 0));
             for mut report in reports {
                 report.fields["raw_device_handle"] =
                     json!(format!("{:x}", header.hDevice.0 as usize));
-                self.sequence += 1;
-                let event = Event {
-                    sequence: self.sequence,
-                    elapsed_us: received_at,
-                    device_id: id.clone(),
-                    connection: generation,
-                    kind: report.kind.into(),
-                    fields: report.fields,
-                    raw: report.raw,
-                };
-                if self.events.try_send(event).is_err() {
-                    self.lost.fetch_add(1, Ordering::Relaxed);
-                }
+                self.emit(
+                    received_at,
+                    id.clone(),
+                    generation,
+                    report.kind,
+                    report.fields,
+                    report.raw,
+                );
             }
         }
         Ok(())
@@ -349,7 +359,12 @@ fn run(state: State, ready: &Sender<std::result::Result<u32, String>>) -> Result
         let result = (|| -> Result<()> {
             state.refresh(window)?;
             ensure!(
-                SetTimer(Some(window), 1, 2000, None) != 0,
+                SetTimer(
+                    Some(window),
+                    DISCOVERY_TIMER_ID,
+                    DISCOVERY_INTERVAL_MS,
+                    None
+                ) != 0,
                 "create device discovery timer"
             );
             let _ = ready.send(Ok(GetCurrentThreadId()));
@@ -364,7 +379,7 @@ fn run(state: State, ready: &Sender<std::result::Result<u32, String>>) -> Result
             }
             Ok(())
         })();
-        let _ = KillTimer(Some(window), 1);
+        let _ = KillTimer(Some(window), DISCOVERY_TIMER_ID);
         let _ = DestroyWindow(window);
         let _ = UnregisterClassW(class.lpszClassName, Some(instance.into()));
         result

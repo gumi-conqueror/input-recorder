@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, atomic::Ordering},
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -30,6 +30,11 @@ pub(crate) struct Recording {
     pub preview: Receiver<Event>,
     pub progress: Arc<Mutex<Progress>>,
     pub started: Instant,
+}
+
+/// Recordings live in this subfolder of the data folder.
+pub(crate) fn directory(data: &Path) -> PathBuf {
+    data.join("recordings")
 }
 
 impl Recording {

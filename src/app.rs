@@ -9,10 +9,10 @@ use anyhow::Result;
 use eframe::egui;
 
 use crate::{
-    devices, export,
+    arguments, devices, export,
     model::{Device, Event, hex},
     permissions,
-    recording::Recording,
+    recording::{self, Recording},
 };
 
 enum LogEntry {
@@ -89,20 +89,18 @@ impl App {
             restarting: None,
         };
         app.refresh()?;
-        let arguments: Vec<_> = std::env::args().collect();
-        if let Some(index) = arguments
-            .iter()
-            .position(|argument| argument == "--selection")
-        {
-            app.selected = arguments
-                .get(index + 1)
-                .ok_or_else(|| anyhow::anyhow!("missing device selection"))?
-                .split(',')
-                .filter(|id| !id.is_empty())
-                .map(str::to_owned)
-                .collect();
+        if let Some(selection) = arguments::text(arguments::SELECTION)? {
+            app.selected = arguments::parse_selection(&selection);
         }
         Ok(app)
+    }
+
+    /// A background job is running: recording, stopping, exporting or an elevated restart.
+    fn busy(&self) -> bool {
+        self.recording.is_some()
+            || self.stopping.is_some()
+            || self.exporting.is_some()
+            || self.restarting.is_some()
     }
 
     pub(crate) fn notice(&mut self, message: String) {
@@ -138,7 +136,7 @@ impl App {
             .cloned()
             .collect();
         match Recording::start(
-            self.directory.join("recordings"),
+            recording::directory(&self.directory),
             devices,
             self.graphics.clone(),
         ) {
@@ -180,7 +178,7 @@ impl App {
 
     fn open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .set_directory(self.directory.join("recordings"))
+            .set_directory(recording::directory(&self.directory))
             .add_filter("Recording", &["sqlite"])
             .pick_file()
         {
@@ -265,28 +263,19 @@ impl eframe::App for App {
                 }
             }
         }
-        if ctx.input(|input| input.viewport().close_requested())
-            && (self.recording.is_some() || self.stopping.is_some() || self.exporting.is_some())
-        {
+        if ctx.input(|input| input.viewport().close_requested()) && self.busy() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.closing = true;
             self.stop();
         }
-        if self.closing
-            && self.recording.is_none()
-            && self.stopping.is_none()
-            && self.exporting.is_none()
-        {
+        if self.closing && !self.busy() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ctx.request_repaint_after(Duration::from_millis(100));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let idle = self.recording.is_none()
-            && self.stopping.is_none()
-            && self.exporting.is_none()
-            && self.restarting.is_none();
+        let idle = !self.busy();
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Input Recorder");
             ui.label(&self.graphics);

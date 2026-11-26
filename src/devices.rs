@@ -75,6 +75,20 @@ pub(crate) fn enumerate() -> Result<Vec<Device>> {
     Ok(raw_list()?.iter().map(describe).collect())
 }
 
+/// HID button and value capabilities describe either a usage range or one usage.
+/// Both export as `[min, max]`. The two capability types share field names but not a type.
+macro_rules! usage_range {
+    ($caps:expr) => {
+        if $caps.IsRange {
+            let range = $caps.Anonymous.Range;
+            json!([range.UsageMin, range.UsageMax])
+        } else {
+            let usage = $caps.Anonymous.NotRange.Usage;
+            json!([usage, usage])
+        }
+    };
+}
+
 fn device_bytes(handle: HANDLE, command: RAW_INPUT_DEVICE_INFO_COMMAND) -> Result<Vec<usize>> {
     let mut bytes = 0;
     ensure!(
@@ -167,20 +181,20 @@ fn describe_inner(entry: &RAWINPUTDEVICELIST, device: &mut Device) -> Result<()>
             "device information: {}",
             windows::core::Error::from_thread()
         );
+        if let Some(kind) = crate::packet::kind_name(info.dwType.0) {
+            device.kind = kind.into();
+        }
         match info.dwType {
             RIM_TYPEKEYBOARD => {
-                device.kind = "keyboard".into();
                 device.usage_page = 1;
                 device.usage = 6;
             }
             RIM_TYPEMOUSE => {
-                device.kind = "mouse".into();
                 device.usage_page = 1;
                 device.usage = 2;
             }
             RIM_TYPEHID => {
                 let hid = info.Anonymous.hid;
-                device.kind = "hid".into();
                 device.usage_page = hid.usUsagePage;
                 device.usage = hid.usUsage;
                 device.properties = json!({"vendor_id": hid.dwVendorId, "product_id": hid.dwProductId, "version": hid.dwVersionNumber});
@@ -418,15 +432,7 @@ fn hid_capabilities(handle: HANDLE) -> Result<Value> {
                 );
             }
             for button in buttons.iter().take(count as usize) {
-                let range = if button.IsRange {
-                    let r = button.Anonymous.Range;
-                    json!([r.UsageMin, r.UsageMax])
-                } else {
-                    json!([
-                        button.Anonymous.NotRange.Usage,
-                        button.Anonymous.NotRange.Usage
-                    ])
-                };
+                let range = usage_range!(button);
                 reports.push(json!({"type": name, "kind": "button", "report_id": button.ReportID,
                     "usage_page": button.UsagePage, "usage_range": range, "link_collection": button.LinkCollection,
                     "absolute": button.IsAbsolute, "report_count": button.ReportCount}));
@@ -441,15 +447,7 @@ fn hid_capabilities(handle: HANDLE) -> Result<Value> {
                 );
             }
             for value in values.iter().take(count as usize) {
-                let range = if value.IsRange {
-                    let r = value.Anonymous.Range;
-                    json!([r.UsageMin, r.UsageMax])
-                } else {
-                    json!([
-                        value.Anonymous.NotRange.Usage,
-                        value.Anonymous.NotRange.Usage
-                    ])
-                };
+                let range = usage_range!(value);
                 reports.push(json!({"type": name, "kind": "value", "report_id": value.ReportID,
                     "usage_page": value.UsagePage, "usage_range": range, "link_collection": value.LinkCollection,
                     "absolute": value.IsAbsolute, "bit_size": value.BitSize, "report_count": value.ReportCount,

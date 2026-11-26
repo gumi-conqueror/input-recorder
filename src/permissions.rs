@@ -3,6 +3,8 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
+
+use crate::arguments;
 use windows::{
     Win32::{
         Foundation::{CloseHandle, HANDLE, WAIT_TIMEOUT},
@@ -60,15 +62,8 @@ pub(crate) fn session_id() -> Result<u32> {
 }
 
 pub(crate) fn check_session() -> Result<()> {
-    let arguments: Vec<_> = std::env::args().collect();
-    if let Some(index) = arguments
-        .iter()
-        .position(|argument| argument == "--expected-session")
-    {
-        let expected: u32 = arguments
-            .get(index + 1)
-            .context("missing expected session")?
-            .parse()?;
+    if let Some(expected) = arguments::text(arguments::EXPECTED_SESSION)? {
+        let expected: u32 = expected.parse()?;
         ensure!(
             session_id()? == expected,
             "elevation changed the target Windows session"
@@ -83,28 +78,29 @@ pub(crate) fn restart(directory: &Path, selected: Option<&BTreeSet<String>>) -> 
     let executable = std::env::current_exe()?;
     // The portable data folder may not exist until recording starts.
     let directory = std::path::absolute(directory)?;
-    let mut arguments = Vec::new();
+    let mut command_line = Vec::new();
     for argument in [
-        OsStr::new("--data-dir"),
+        OsStr::new(arguments::DATA_DIR),
         directory.as_os_str(),
-        OsStr::new("--expected-session"),
+        OsStr::new(arguments::EXPECTED_SESSION),
         OsStr::new(&session_id()?.to_string()),
     ] {
-        if !arguments.is_empty() {
-            arguments.push(u16::from(b' '));
+        if !command_line.is_empty() {
+            command_line.push(u16::from(b' '));
         }
-        arguments.extend(quote(argument));
+        command_line.extend(quote(argument));
     }
     if let Some(selected) = selected {
-        let selection = selected.iter().cloned().collect::<Vec<_>>().join(",");
-        arguments.extend(" --selection ".encode_utf16());
-        arguments.extend(quote(OsStr::new(&selection)));
+        command_line.push(u16::from(b' '));
+        command_line.extend(quote(OsStr::new(arguments::SELECTION)));
+        command_line.push(u16::from(b' '));
+        command_line.extend(quote(OsStr::new(&arguments::selection(selected))));
     }
     ensure!(
-        arguments.len() < 32766,
+        command_line.len() < 32766,
         "too many selected device IDs for an elevated restart"
     );
-    arguments.push(0);
+    command_line.push(0);
     let executable: Vec<u16> = executable
         .as_os_str()
         .encode_wide()
@@ -118,7 +114,7 @@ pub(crate) fn restart(directory: &Path, selected: Option<&BTreeSet<String>>) -> 
             fMask: SEE_MASK_NOCLOSEPROCESS,
             lpVerb: w!("runas"),
             lpFile: PCWSTR(executable.as_ptr()),
-            lpParameters: PCWSTR(arguments.as_ptr()),
+            lpParameters: PCWSTR(command_line.as_ptr()),
             nShow: SW_SHOWNORMAL.0,
             ..Default::default()
         };
